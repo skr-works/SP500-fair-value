@@ -6,11 +6,10 @@ import requests
 import pandas as pd
 import yfinance as yf
 import time
-import json  # 追加: JSONを扱うためのライブラリ
+import json
 
 # --- 設定: 環境変数(JSON)から一括取得 ---
 try:
-    # 1つの環境変数 'WP_CREDENTIALS' からJSONとして読み込む
     creds_json = os.environ["WP_CREDENTIALS"]
     creds = json.loads(creds_json)
 
@@ -81,6 +80,8 @@ def get_sp500_data():
             if yield_raw is None: yield_raw = 0
 
             short_name = info.get('shortName', ticker)
+            
+            # セクター情報は取得するが、HTML生成では使用しない
             sector = info.get('sector', 'Unknown')
 
             if price is None or eps is None or growth_raw is None:
@@ -108,13 +109,12 @@ def get_sp500_data():
             time.sleep(0.1)
             
         except Exception as e:
-            # print(f"Error fetching {ticker}: {e}") # ログ過多を防ぐためコメントアウト可
             continue
 
     sorted_data = sorted(results, key=lambda x: x['upside'], reverse=True)
     return sorted_data
 
-# --- 3. HTML生成 ---
+# --- 3. HTML生成 (修正箇所: フォントサイズ9px, セクター削除) ---
 def generate_html(data):
     print("HTML生成中...")
     
@@ -126,7 +126,8 @@ def generate_html(data):
     <br>
     """
     
-    html += "<table>"
+    # 修正: フォントサイズを9pxに指定
+    html += '<table style="font-size: 9px;">'
     html += """
     <thead>
         <tr>
@@ -134,7 +135,6 @@ def generate_html(data):
             <th>現在株価</th>
             <th>理論株価</th>
             <th>割安度</th>
-            <th>セクター</th>
         </tr>
     </thead>
     <tbody>
@@ -149,13 +149,13 @@ def generate_html(data):
         else:
             upside_html = f'<span style="color: #cc0000; font-weight: bold;">{upside_str}</span>'
             
+        # 修正: セクター列(td)を削除
         row = f"""
         <tr>
             <td><strong>{item['ticker']}</strong><br><small>{item['name']}</small></td>
             <td>${item['price']:.2f}</td>
             <td>${item['fair_value']:.2f}</td>
             <td>{upside_html}</td>
-            <td>{item['sector']}</td>
         </tr>
         """
         html += row
