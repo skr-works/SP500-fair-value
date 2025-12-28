@@ -2,9 +2,7 @@ name: WP Auto Update S&P500
 
 on:
   schedule:
-    # UTC 21:30 = 日本時間 06:30
-    # 曜日 1-5 (月-金) -> 日本時間の 火-土 に実行
-    # これにより、米国市場クローズ後のデータを確実に取得
+    # UTC 21:30 = 日本時間 06:30 (火-土)
     - cron: '30 21 * * 1-5'
   workflow_dispatch:
 
@@ -28,8 +26,6 @@ jobs:
 
       - name: Run update script
         env:
-          WP_URL: ${{ secrets.WP_URL }}
-          WP_USER: ${{ secrets.WP_USER }}
-          WP_APP_PASS: ${{ secrets.WP_APP_PASS }}
-          WP_PAGE_ID: ${{ secrets.WP_PAGE_ID }}
+          # ここで1つにまとめたSecretsを渡す
+          WP_CREDENTIALS: ${{ secrets.WP_CREDENTIALS }}
         run: python update_wp.py
