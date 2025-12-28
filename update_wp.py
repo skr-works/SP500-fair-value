@@ -81,7 +81,7 @@ def get_sp500_data():
 
             short_name = info.get('shortName', ticker)
             
-            # セクター情報は取得するが、HTML生成では使用しない
+            # HTML生成では使用しないが取得しておく
             sector = info.get('sector', 'Unknown')
 
             if price is None or eps is None or growth_raw is None:
@@ -114,7 +114,7 @@ def get_sp500_data():
     sorted_data = sorted(results, key=lambda x: x['upside'], reverse=True)
     return sorted_data
 
-# --- 3. HTML生成 (修正箇所: フォントサイズ9px, セクター削除) ---
+# --- 3. HTML生成 (修正箇所: フォント10px, 余白極小化) ---
 def generate_html(data):
     print("HTML生成中...")
     
@@ -126,15 +126,15 @@ def generate_html(data):
     <br>
     """
     
-    # 修正: フォントサイズを9pxに指定
-    html += '<table style="font-size: 9px;">'
+    # テーブル設定: フォント10px, 行間詰め(line-height:1.2), 枠線結合
+    html += '<table style="font-size: 10px; line-height: 1.2; border-collapse: collapse; width: 100%;">'
     html += """
     <thead>
         <tr>
-            <th>ティッカー / 社名</th>
-            <th>現在株価</th>
-            <th>理論株価</th>
-            <th>割安度</th>
+            <th style="padding: 2px 4px;">ティッカー / 社名</th>
+            <th style="padding: 2px 4px;">現在株価</th>
+            <th style="padding: 2px 4px;">理論株価</th>
+            <th style="padding: 2px 4px;">割安度</th>
         </tr>
     </thead>
     <tbody>
@@ -149,13 +149,13 @@ def generate_html(data):
         else:
             upside_html = f'<span style="color: #cc0000; font-weight: bold;">{upside_str}</span>'
             
-        # 修正: セクター列(td)を削除
+        # 各セルに padding: 2px 4px を指定して余白を詰める
         row = f"""
         <tr>
-            <td><strong>{item['ticker']}</strong><br><small>{item['name']}</small></td>
-            <td>${item['price']:.2f}</td>
-            <td>${item['fair_value']:.2f}</td>
-            <td>{upside_html}</td>
+            <td style="padding: 2px 4px;"><strong>{item['ticker']}</strong><br><small style="font-size: 9px;">{item['name']}</small></td>
+            <td style="padding: 2px 4px;">${item['price']:.2f}</td>
+            <td style="padding: 2px 4px;">${item['fair_value']:.2f}</td>
+            <td style="padding: 2px 4px;">{upside_html}</td>
         </tr>
         """
         html += row
