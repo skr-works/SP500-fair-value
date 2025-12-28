@@ -1,0 +1,35 @@
+name: WP Auto Update S&P500
+
+on:
+  schedule:
+    # UTC 21:30 = 日本時間 06:30
+    # 曜日 1-5 (月-金) -> 日本時間の 火-土 に実行
+    # これにより、米国市場クローズ後のデータを確実に取得
+    - cron: '30 21 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run update script
+        env:
+          WP_URL: ${{ secrets.WP_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASS: ${{ secrets.WP_APP_PASS }}
+          WP_PAGE_ID: ${{ secrets.WP_PAGE_ID }}
+        run: python update_wp.py
