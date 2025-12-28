@@ -114,7 +114,7 @@ def get_sp500_data():
     sorted_data = sorted(results, key=lambda x: x['upside'], reverse=True)
     return sorted_data
 
-# --- 3. HTML生成 (修正箇所: フォント10px, 余白極小化) ---
+# --- 3. HTML生成 (修正箇所: 列分割による1行表示化) ---
 def generate_html(data):
     print("HTML生成中...")
     
@@ -126,12 +126,13 @@ def generate_html(data):
     <br>
     """
     
-    # テーブル設定: フォント10px, 行間詰め(line-height:1.2), 枠線結合
+    # テーブル設定: フォント10px, 行間詰め, 枠線結合
     html += '<table style="font-size: 10px; line-height: 1.2; border-collapse: collapse; width: 100%;">'
     html += """
     <thead>
         <tr>
-            <th style="padding: 2px 4px;">ティッカー / 社名</th>
+            <th style="padding: 2px 4px;">ティッカー</th>
+            <th style="padding: 2px 4px;">社名</th>
             <th style="padding: 2px 4px;">現在株価</th>
             <th style="padding: 2px 4px;">理論株価</th>
             <th style="padding: 2px 4px;">割安度</th>
@@ -149,10 +150,11 @@ def generate_html(data):
         else:
             upside_html = f'<span style="color: #cc0000; font-weight: bold;">{upside_str}</span>'
             
-        # 各セルに padding: 2px 4px を指定して余白を詰める
+        # 修正: ティッカーと社名を別々の列(td)に分割
         row = f"""
         <tr>
-            <td style="padding: 2px 4px;"><strong>{item['ticker']}</strong><br><small style="font-size: 9px;">{item['name']}</small></td>
+            <td style="padding: 2px 4px;"><strong>{item['ticker']}</strong></td>
+            <td style="padding: 2px 4px;"><small style="font-size: 9px;">{item['name']}</small></td>
             <td style="padding: 2px 4px;">${item['price']:.2f}</td>
             <td style="padding: 2px 4px;">${item['fair_value']:.2f}</td>
             <td style="padding: 2px 4px;">{upside_html}</td>
