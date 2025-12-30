@@ -182,7 +182,7 @@ def generate_html(data):
             <th style="padding: 2px 4px;">ティッカー</th>
             <th style="padding: 2px 4px;">社名</th>
             <th style="padding: 2px 4px;">現在株価</th>
-            <th style="padding: 2px 4px;">理論株価</th>
+            <th style="padding: 2px 4px;">適正株価</th>
             <th style="padding: 2px 4px;">割安度</th>
         </tr>
     </thead>
