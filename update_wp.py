@@ -7,6 +7,7 @@ import pandas as pd
 import yfinance as yf
 import time
 import json
+from io import StringIO  # 追加: 文字列をファイルのように扱うために必要
 
 # --- 設定: 環境変数(JSON)から一括取得 ---
 try:
@@ -51,12 +52,29 @@ def check_market_status():
     
     print(f"データ確認OK (最終取引日: {last_trade_date})")
 
-# --- 2. データ取得と計算 ---
+# --- 2. データ取得と計算 (修正: ヘッダー追加による403回避) ---
 def get_sp500_data():
     print("S&P500リストを取得中...")
     url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
-    tables = pd.read_html(url)
-    df_sp500 = tables[0]
+    
+    # 修正: ブラウザのふりをするためのヘッダー
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
+    
+    try:
+        # requests経由で取得
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        
+        # StringIOを使ってpandasに渡す
+        tables = pd.read_html(StringIO(response.text))
+        df_sp500 = tables[0]
+        
+    except Exception as e:
+        print(f"S&P500リスト取得エラー: {e}")
+        sys.exit(1)
+
     tickers = df_sp500['Symbol'].tolist()
     tickers = [t.replace('.', '-') for t in tickers]
     
@@ -114,7 +132,7 @@ def get_sp500_data():
     sorted_data = sorted(results, key=lambda x: x['upside'], reverse=True)
     return sorted_data
 
-# --- 3. HTML生成 (修正箇所: 列分割による1行表示化) ---
+# --- 3. HTML生成 ---
 def generate_html(data):
     print("HTML生成中...")
     
@@ -150,7 +168,6 @@ def generate_html(data):
         else:
             upside_html = f'<span style="color: #cc0000; font-weight: bold;">{upside_str}</span>'
             
-        # 修正: ティッカーと社名を別々の列(td)に分割
         row = f"""
         <tr>
             <td style="padding: 2px 4px;"><strong>{item['ticker']}</strong></td>
