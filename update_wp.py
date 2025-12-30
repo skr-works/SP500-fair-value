@@ -52,12 +52,12 @@ def check_market_status():
     
     print(f"データ確認OK (最終取引日: {last_trade_date})")
 
-# --- 2. データ取得と計算 (修正版: 現実的なフィルタリング適用) ---
+# --- 2. データ取得と計算 (修正版: 成長率キャップ & 予想EPS採用) ---
 def get_sp500_data():
     print("S&P500リストを取得中...")
     url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
     
-    # Wikipediaへのアクセス拒否回避用ヘッダー
+    # 403エラー対策: ブラウザのふりをする
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     }
@@ -85,8 +85,7 @@ def get_sp500_data():
             
             price = info.get('currentPrice')
             
-            # 【変更点1】 EPSは「予想EPS (Forward EPS)」を優先使用
-            # これにより過去の特別損失などの影響を排除し、未来の収益力を反映させる
+            # 修正A: 過去EPSより「予想EPS (Forward EPS)」を優先
             eps = info.get('forwardEps')
             if eps is None:
                 eps = info.get('trailingEps')
@@ -102,27 +101,26 @@ def get_sp500_data():
             short_name = info.get('shortName', ticker)
             sector = info.get('sector', 'Unknown')
 
-            # 必須データ欠損チェック
+            # データ欠損チェック
             if price is None or eps is None or growth_raw is None:
                 continue
-            
-            # 赤字見通しの企業は計算対象外とする
+
+            # 赤字見通しは計算不能なので除外
             if eps <= 0:
                 continue
 
             growth_pct = growth_raw * 100
             yield_pct = yield_raw * 100
             
-            # 【変更点2】 成長率に上限(キャップ)を設定
-            # ピーター・リンチの法則: "年率25%を超える成長が永続することは稀"
-            # 計算上、成長率は最大25%として扱うことで、異常な理論株価を防ぐ
+            # 修正B: 成長率に上限(25%)を設定 (ピーター・リンチのルール)
+            # これにより +1000% のような異常値による計算崩壊を防ぐ
             capped_growth_pct = min(growth_pct, 25.0)
             
-            # 成長率がマイナスの場合は0%として扱い、過度な割安判定を防ぐ
+            # 成長率がマイナスの場合は0として扱う（保守的評価）
             if capped_growth_pct < 0:
                 capped_growth_pct = 0
-
-            # 理論株価算出: EPS × (調整後成長率 + 配当利回り)
+            
+            # 理論株価 = EPS × (調整後成長率 + 配当利回り)
             fair_value = eps * (capped_growth_pct + yield_pct)
             
             if fair_value <= 0:
@@ -130,7 +128,7 @@ def get_sp500_data():
 
             upside = ((fair_value - price) / price) * 100
             
-            # 【変更点3】 あまりに非現実的な乖離（+300%以上など）はデータノイズの可能性が高いため除外
+            # 修正C: 現実離れしたアップサイド（+300%以上）はノイズとして除外
             if upside > 300:
                 continue
 
@@ -148,7 +146,6 @@ def get_sp500_data():
         except Exception as e:
             continue
 
-    # 割安度が高い順にソート
     sorted_data = sorted(results, key=lambda x: x['upside'], reverse=True)
     return sorted_data
 
@@ -156,31 +153,25 @@ def get_sp500_data():
 def generate_html(data):
     print("HTML生成中...")
     
-    # 算出ロジックの説明文も、今回の変更に合わせて更新
+    # ロジック説明文も実態に合わせて少し修正
     html = """
-    <h2>S&P500 割安株ランキング (ピーター・リンチ改良版)</h2>
-    <p>伝説の投資家ピーター・リンチ氏の指標を参考に、より実践的に調整した理論株価ランキングです。</p>
-    <div style="background-color: #f0f0f0; padding: 10px; border-radius: 5px; font-size: 0.9em;">
-        <strong>算出ロジック:</strong><br>
-        理論株価 = 予想EPS × (成長率 + 配当利回り)<br>
-        <br>
-        <small>
-        ※異常値を防ぐため、計算上の成長率は<strong>最大25%</strong>に制限しています。<br>
-        ※EPS(一株当たり利益)は、来期予想値(Forward EPS)を優先して使用しています。
-        </small>
-    </div>
+    <h2>算出ロジックについて</h2>
+    <p>伝説のファンドマネージャー、ピーター・リンチ氏が提唱した簡易式に基づき算出しています。</p>
+    <blockquote>適正株価 = 予想EPS × (成長率 + 配当利回り)</blockquote>
+    <p>※PEGレシオ=1を基準とした簡易モデルです。成長率は最大25%を上限として計算しています。</p>
     <br>
     """
     
-    # テーブル設定
+    # テーブル設定: フォント10px, 行間詰め, 枠線結合
     html += '<table style="font-size: 10px; line-height: 1.2; border-collapse: collapse; width: 100%;">'
     html += """
     <thead>
-        <tr style="background-color: #e6e6e6;">
-            <th style="padding: 4px; text-align: left;">銘柄</th>
-            <th style="padding: 4px; text-align: right;">株価</th>
-            <th style="padding: 4px; text-align: right;">理論値</th>
-            <th style="padding: 4px; text-align: right;">割安度</th>
+        <tr>
+            <th style="padding: 2px 4px;">ティッカー</th>
+            <th style="padding: 2px 4px;">社名</th>
+            <th style="padding: 2px 4px;">現在株価</th>
+            <th style="padding: 2px 4px;">理論株価</th>
+            <th style="padding: 2px 4px;">割安度</th>
         </tr>
     </thead>
     <tbody>
@@ -190,21 +181,18 @@ def generate_html(data):
         upside_val = item['upside']
         upside_str = f"{upside_val:+.1f}%"
         
-        # 割安度に応じた色分け
         if upside_val > 0:
-            upside_html = f'<span style="color: #008000; font-weight: bold;">{upside_str}</span>' # 緑色
+            upside_html = f'<span style="color: #0033cc; font-weight: bold;">{upside_str}</span>'
         else:
-            upside_html = f'<span style="color: #cc0000; font-weight: bold;">{upside_str}</span>' # 赤色
+            upside_html = f'<span style="color: #cc0000; font-weight: bold;">{upside_str}</span>'
             
         row = f"""
-        <tr style="border-bottom: 1px solid #ddd;">
-            <td style="padding: 4px;">
-                <strong>{item['ticker']}</strong><br>
-                <span style="font-size: 8px; color: #555;">{item['name'][:20]}</span>
-            </td>
-            <td style="padding: 4px; text-align: right;">${item['price']:.2f}</td>
-            <td style="padding: 4px; text-align: right;">${item['fair_value']:.2f}</td>
-            <td style="padding: 4px; text-align: right;">{upside_html}</td>
+        <tr>
+            <td style="padding: 2px 4px;"><strong>{item['ticker']}</strong></td>
+            <td style="padding: 2px 4px;"><small style="font-size: 9px;">{item['name']}</small></td>
+            <td style="padding: 2px 4px;">${item['price']:.2f}</td>
+            <td style="padding: 2px 4px;">${item['fair_value']:.2f}</td>
+            <td style="padding: 2px 4px;">{upside_html}</td>
         </tr>
         """
         html += row
@@ -213,10 +201,7 @@ def generate_html(data):
     
     html += """
     <br>
-    <p style="font-size: 0.8em; color: #666;">
-    免責事項: 本情報は自動計算プログラムによる参考値であり、正確性を保証するものではありません。
-    投資判断は必ずご自身の責任において行ってください。
-    </p>
+    <small>本情報は自動計算されたものであり、投資勧誘を目的としたものではありません。投資判断は自己責任で行ってください。</small>
     """
     
     return html
