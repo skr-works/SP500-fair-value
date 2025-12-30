@@ -8,6 +8,7 @@ import yfinance as yf
 import time
 import json
 from io import StringIO
+import concurrent.futures # 追加: 並列処理用
 
 # --- 設定: 環境変数(JSON)から一括取得 ---
 try:
@@ -52,12 +53,81 @@ def check_market_status():
     
     print(f"データ確認OK (最終取引日: {last_trade_date})")
 
-# --- 2. データ取得と計算 (修正版: 成長率キャップ & 予想EPS採用) ---
+# --- 個別銘柄処理用関数 (並列化のために切り出し) ---
+def process_ticker(ticker):
+    try:
+        stock = yf.Ticker(ticker)
+        # fast_infoは早いが項目が足りないことがあるため、通常のinfoを使用
+        info = stock.info
+        
+        price = info.get('currentPrice')
+        
+        # EPS取得: 予想EPS優先
+        eps = info.get('forwardEps')
+        if eps is None:
+            eps = info.get('trailingEps')
+        
+        # 必須データ(価格とEPS)がない、または赤字企業は除外
+        if price is None or eps is None or eps <= 0:
+            return None
+
+        # 成長率取得
+        growth_raw = info.get('earningsGrowth')
+        if growth_raw is None:
+            growth_raw = info.get('revenueGrowth')
+        
+        # 修正: 成長率データが取れない場合はスキップせず、保守的な値(5%)を割り当てる
+        # これにより出力される企業数が大幅に増えます
+        if growth_raw is None:
+            growth_raw = 0.05 
+
+        yield_raw = info.get('dividendYield', 0)
+        if yield_raw is None: yield_raw = 0
+
+        short_name = info.get('shortName', ticker)
+        sector = info.get('sector', 'Unknown')
+
+        growth_pct = growth_raw * 100
+        yield_pct = yield_raw * 100
+        
+        # 成長率キャップ: 最大25% (ピーター・リンチ式)
+        capped_growth_pct = min(growth_pct, 25.0)
+        
+        # マイナス成長の場合は0%とする（株価算出の安定化）
+        if capped_growth_pct < 0:
+            capped_growth_pct = 0
+        
+        # 理論株価計算
+        fair_value = eps * (capped_growth_pct + yield_pct)
+        
+        # 理論株価がマイナスや異常に低い場合は除外
+        if fair_value <= 0:
+            return None
+
+        upside = ((fair_value - price) / price) * 100
+        
+        # ノイズ除去フィルタ: 
+        # 上限を300%から1000%に緩和（より多くの企業を通すため）
+        if upside > 1000:
+            return None
+
+        return {
+            'ticker': ticker,
+            'name': short_name,
+            'price': price,
+            'fair_value': fair_value,
+            'upside': upside,
+            'sector': sector
+        }
+        
+    except Exception:
+        return None
+
+# --- 2. データ取得と計算 (並列処理版) ---
 def get_sp500_data():
     print("S&P500リストを取得中...")
     url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
     
-    # 403エラー対策: ブラウザのふりをする
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     }
@@ -74,77 +144,21 @@ def get_sp500_data():
     tickers = df_sp500['Symbol'].tolist()
     tickers = [t.replace('.', '-') for t in tickers]
     
+    print(f"{len(tickers)} 銘柄のデータ取得を開始します (並列処理)...")
+    
     results = []
     
-    print(f"{len(tickers)} 銘柄のデータ取得を開始します...")
-    
-    for ticker in tickers:
-        try:
-            stock = yf.Ticker(ticker)
-            info = stock.info
-            
-            price = info.get('currentPrice')
-            
-            # 修正A: 過去EPSより「予想EPS (Forward EPS)」を優先
-            eps = info.get('forwardEps')
-            if eps is None:
-                eps = info.get('trailingEps')
-            
-            # 成長率の取得
-            growth_raw = info.get('earningsGrowth')
-            if growth_raw is None:
-                growth_raw = info.get('revenueGrowth')
-            
-            yield_raw = info.get('dividendYield', 0)
-            if yield_raw is None: yield_raw = 0
+    # 並列処理: 同時に20銘柄ずつ処理を行うことで時間を短縮
+    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+        # process_ticker関数を各tickerに適用
+        futures = list(executor.map(process_ticker, tickers))
+        
+    # Noneを除外して結果を格納
+    for res in futures:
+        if res is not None:
+            results.append(res)
 
-            short_name = info.get('shortName', ticker)
-            sector = info.get('sector', 'Unknown')
-
-            # データ欠損チェック
-            if price is None or eps is None or growth_raw is None:
-                continue
-
-            # 赤字見通しは計算不能なので除外
-            if eps <= 0:
-                continue
-
-            growth_pct = growth_raw * 100
-            yield_pct = yield_raw * 100
-            
-            # 修正B: 成長率に上限(25%)を設定 (ピーター・リンチのルール)
-            # これにより +1000% のような異常値による計算崩壊を防ぐ
-            capped_growth_pct = min(growth_pct, 25.0)
-            
-            # 成長率がマイナスの場合は0として扱う（保守的評価）
-            if capped_growth_pct < 0:
-                capped_growth_pct = 0
-            
-            # 理論株価 = EPS × (調整後成長率 + 配当利回り)
-            fair_value = eps * (capped_growth_pct + yield_pct)
-            
-            if fair_value <= 0:
-                continue
-
-            upside = ((fair_value - price) / price) * 100
-            
-            # 修正C: 現実離れしたアップサイド（+300%以上）はノイズとして除外
-            if upside > 300:
-                continue
-
-            results.append({
-                'ticker': ticker,
-                'name': short_name,
-                'price': price,
-                'fair_value': fair_value,
-                'upside': upside,
-                'sector': sector
-            })
-            
-            time.sleep(0.1)
-            
-        except Exception as e:
-            continue
+    print(f"取得完了: 有効データ {len(results)} 件")
 
     sorted_data = sorted(results, key=lambda x: x['upside'], reverse=True)
     return sorted_data
@@ -153,16 +167,14 @@ def get_sp500_data():
 def generate_html(data):
     print("HTML生成中...")
     
-    # ロジック説明文も実態に合わせて少し修正
     html = """
     <h2>算出ロジックについて</h2>
     <p>伝説のファンドマネージャー、ピーター・リンチ氏が提唱した簡易式に基づき算出しています。</p>
     <blockquote>適正株価 = 予想EPS × (成長率 + 配当利回り)</blockquote>
-    <p>※PEGレシオ=1を基準とした簡易モデルです。成長率は最大25%を上限として計算しています。</p>
+    <p>※PEGレシオ=1を基準とした簡易モデルです。成長率は最大25%を上限とし、データ欠損時は保守的な値を採用しています。</p>
     <br>
     """
     
-    # テーブル設定: フォント10px, 行間詰め, 枠線結合
     html += '<table style="font-size: 10px; line-height: 1.2; border-collapse: collapse; width: 100%;">'
     html += """
     <thead>
