@@ -32,26 +32,6 @@ $$
 * `requirements.txt`: 依存ライブラリ
 * `.github/workflows/wp_update.yml`: 自動化設定
 
-### 2. GitHub Secretsの設定
-リポジトリの `Settings` > `Secrets and variables` > `Actions` にて、以下の名前でSecretを**1つ**登録します。
-
-**Name**: `WP_CREDENTIALS`
-
-**Secret (Value)**:
-以下のJSON形式で入力してください。
-```json
-{
-  "WP_URL": "[https://your-site.com](https://your-site.com)",
-  "WP_USER": "your_username",
-  "WP_APP_PASS": "xxxx xxxx xxxx xxxx",
-  "WP_PAGE_ID": "1234"
-}
-
-```
-
-※ `WP_URL` の末尾にスラッシュは不要です。
-※ `WP_PAGE_ID` は更新したい固定ページのIDを指定します。
-
 ## 実行スケジュール
 
 `.github/workflows/wp_update.yml` により制御されます。
