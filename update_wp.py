@@ -7,6 +7,7 @@ import pandas as pd
 import yfinance as yf
 import time
 import json
+import math  # 追加: 平方根計算用
 from io import StringIO
 import concurrent.futures # 追加: 並列処理用
 
@@ -61,44 +62,43 @@ def process_ticker(ticker):
         info = stock.info
         
         price = info.get('currentPrice')
+        if price is None:
+            return None
         
-        # EPS取得: 予想EPS優先
+        # --- 1. EPS (1株当たり利益) の取得 ---
+        # 予想EPSを優先、なければ実績EPS
         eps = info.get('forwardEps')
         if eps is None:
             eps = info.get('trailingEps')
         
-        # 必須データ(価格とEPS)がない、または赤字企業は除外
-        if price is None or eps is None or eps <= 0:
+        # EPSがない、または赤字の場合は計算不能 (グレアム数はルート計算するため正の数必須)
+        if eps is None or eps <= 0:
             return None
 
-        # 成長率取得
-        growth_raw = info.get('earningsGrowth')
-        if growth_raw is None:
-            growth_raw = info.get('revenueGrowth')
+        # --- 2. BPS (1株当たり純資産) の取得 ---
+        bps = info.get('bookValue')
         
-        # 修正: 成長率データが取れない場合はスキップせず、保守的な値(5%)を割り当てる
-        # これにより出力される企業数が大幅に増えます
-        if growth_raw is None:
-            growth_raw = 0.05 
-
-        yield_raw = info.get('dividendYield', 0)
-        if yield_raw is None: yield_raw = 0
+        # BPSがない場合、PBRから逆算 (BPS = 株価 / PBR)
+        if bps is None:
+            pbr = info.get('priceToBook')
+            if pbr and pbr > 0:
+                bps = price / pbr
+        
+        # 債務超過(BPSマイナス)の場合は計算不能
+        if bps is None or bps <= 0:
+            return None
 
         short_name = info.get('shortName', ticker)
         sector = info.get('sector', 'Unknown')
 
-        growth_pct = growth_raw * 100
-        yield_pct = yield_raw * 100
-        
-        # 成長率キャップ: 最大25% (ピーター・リンチ式)
-        capped_growth_pct = min(growth_pct, 25.0)
-        
-        # マイナス成長の場合は0%とする（株価算出の安定化）
-        if capped_growth_pct < 0:
-            capped_growth_pct = 0
-        
-        # 理論株価計算
-        fair_value = eps * (capped_growth_pct + yield_pct)
+        # --- 3. グレアム数 (理論株価) の計算 ---
+        # 公式: √ (22.5 * EPS * BPS)
+        try:
+            graham_number = math.sqrt(22.5 * eps * bps)
+        except ValueError:
+            return None
+
+        fair_value = graham_number
         
         # 理論株価がマイナスや異常に低い場合は除外
         if fair_value <= 0:
@@ -107,8 +107,8 @@ def process_ticker(ticker):
         upside = ((fair_value - price) / price) * 100
         
         # ノイズ除去フィルタ: 
-        # 上限を300%から1000%に緩和（より多くの企業を通すため）
-        if upside > 1000:
+        # グレアム数で+300%以上はよほどの資産バリュー株でない限り稀（データエラーの可能性大）
+        if upside > 300:
             return None
 
         return {
@@ -169,9 +169,9 @@ def generate_html(data):
     
     html = """
     <h2>算出ロジックについて</h2>
-    <p>伝説のファンドマネージャー、ピーター・リンチ氏が提唱した簡易式に基づき算出しています。</p>
-    <blockquote>適正株価 = 予想EPS × (成長率 + 配当利回り)</blockquote>
-    <p>※PEGレシオ=1を基準とした簡易モデルです。成長率は最大25%を上限とし、データ欠損時は保守的な値を採用しています。</p>
+    <p>ベンジャミン・グレアムのミックス係数に基づき算出しています。</p>
+    <blockquote>適正株価 = √(22.5 × EPS × BPS)</blockquote>
+    <p>※PER 15倍 × PBR 1.5倍 = 22.5 を基準とした理論値です。<br>資産と利益の両面から見た保守的な適正価格を示します。</p>
     <br>
     """
     
@@ -193,10 +193,12 @@ def generate_html(data):
         upside_val = item['upside']
         upside_str = f"{upside_val:+.1f}%"
         
+        # 割安(プラス)は赤(#cc0000)、割高(マイナス)は青(#0033cc)
+        # ※元コードの色定義に合わせて調整
         if upside_val > 0:
-            upside_html = f'<span style="color: #0033cc; font-weight: bold;">{upside_str}</span>'
-        else:
             upside_html = f'<span style="color: #cc0000; font-weight: bold;">{upside_str}</span>'
+        else:
+            upside_html = f'<span style="color: #0033cc; font-weight: bold;">{upside_str}</span>'
             
         row = f"""
         <tr>
